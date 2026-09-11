@@ -1,5 +1,10 @@
 # SAFi — Runtime Governance Gate
 
+![benchmark](https://img.shields.io/badge/benchmark-51%2F51%20live-brightgreen)
+![offline](https://img.shields.io/badge/offline-49%2F49-brightgreen)
+![judge](https://img.shields.io/badge/judge-claude--haiku--4--5-blue)
+![license](https://img.shields.io/badge/license-MIT-green)
+
 A deterministic runtime firewall for the [Computer Use API](https://docs.claude.com/en/docs/agents-and-tools/computer-use). It intercepts every `tool_use` block the model emits and scores it **before** the action reaches the container.
 
 Built against [`anthropics/anthropic-quickstarts`](https://github.com/anthropics/anthropic-quickstarts) `computer-use-demo` (upstream `3313e97`).
