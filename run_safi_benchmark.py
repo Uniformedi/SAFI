@@ -35,6 +35,7 @@ Exit code is 0 only if every case matched its expectation.
 
 from __future__ import annotations
 
+import inspect
 import os
 import sys
 from dataclasses import dataclass
@@ -235,6 +236,44 @@ class _Response:
         self.content = [] if text is None else [_Block(text)]
 
 
+def _judge_temperature(kwargs: dict[str, Any]) -> Any:
+    """Read the judge's temperature from wherever the SDK version puts it.
+
+    anthropic 1.x removed temperature from the typed signature of
+    messages.create(), so the gate carries it in extra_body. Accept either
+    placement: what matters to this assertion is that it is pinned to 0.
+    """
+    if "temperature" in kwargs:
+        return kwargs["temperature"]
+    return (kwargs.get("extra_body") or {}).get("temperature")
+
+
+def assert_sdk_accepts(kwargs: dict[str, Any]) -> None:
+    """Assert the real SDK would accept the kwargs the gate just sent.
+
+    This exists because of a bug this benchmark did not catch. A scripted
+    judge takes **kwargs and therefore accepts anything, including arguments
+    the installed SDK would reject -- so REPLAY reported 28/28 while every
+    live Layer 2 call raised TypeError and the gate failed closed on all of
+    them. The gate looked healthy and denied everything.
+
+    Checking the stub's kwargs against the installed signature closes that
+    gap offline: a signature drift now fails a REPLAY run instead of waiting
+    for a live one.
+    """
+    try:
+        from anthropic.resources.messages import Messages
+    except Exception:  # SDK absent -- the offline sections still mean something
+        return
+    accepted = set(inspect.signature(Messages.create).parameters)
+    unknown = sorted(k for k in kwargs if k not in accepted)
+    assert not unknown, (
+        f"gate sends {unknown}, which this anthropic version's "
+        f"Messages.create() does not accept; a live run would fail closed "
+        f"on TypeError for every tool call"
+    )
+
+
 class _Messages:
     def __init__(self, owner: ScriptedJudge) -> None:
         self._owner = owner
@@ -261,7 +300,8 @@ class ScriptedJudge:
     def respond(self, **kwargs: Any) -> Any:
         # The gate's own contract: the judge is pinned and deterministic.
         assert kwargs["model"] == SAFI_JUDGE_MODEL, "judge model is not pinned"
-        assert kwargs["temperature"] == 0, "judge is not deterministic"
+        assert _judge_temperature(kwargs) == 0, "judge is not deterministic"
+        assert_sdk_accepts(kwargs)
         if self._raises is not None:
             raise self._raises
         return _Response(self._text)
@@ -566,6 +606,26 @@ def run_saivas(results: Results) -> None:
     )
     for label, ok in checks:
         results.record(ok, label, "state contract" if ok else "state contract VIOLATED")
+
+    # The bug this benchmark missed: a scripted judge accepts **kwargs, so
+    # REPLAY cannot tell a valid request from one the real SDK would reject.
+    # Check the gate's actual kwargs against the installed signature.
+    sent: dict[str, Any] = {}
+
+    class _Capture(ScriptedJudge):
+        def respond(self, **kwargs: Any) -> Any:
+            sent.update(kwargs)
+            return _Response('{"decision": "ALLOW", "reason": "ok"}')
+
+    evaluate_conscience("bash", _ORDINARY, client=_Capture())
+    try:
+        assert_sdk_accepts(sent)
+        assert _judge_temperature(sent) == 0, "temperature is not pinned to 0"
+        detail = f"installed SDK accepts all {len(sent)} kwargs; temperature pinned to 0"
+        ok = True
+    except AssertionError as exc:
+        detail, ok = str(exc), False
+    results.record(ok, "gate's request matches the installed SDK signature", detail)
 
     # Restricted data attaches an attestation obligation, per the OPA policy.
     restricted = evaluate_layer_3(

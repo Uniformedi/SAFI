@@ -734,7 +734,19 @@ def evaluate_layer_2(tool_name: str, tool_input: Any, *, client: Any = None) -> 
         response = judge.messages.create(
             model=SAFI_JUDGE_MODEL,
             max_tokens=SAFI_JUDGE_MAX_TOKENS,
-            temperature=0,
+            # temperature is a determinism requirement for a governance
+            # control, not a tuning knob -- the same payload must score the
+            # same way twice or the audit trail means nothing.
+            #
+            # anthropic 1.x removed temperature/top_p/top_k from the typed
+            # signature of messages.create(); passing temperature=0 directly
+            # raises TypeError, which this gate's fail-closed handler then
+            # reports as judge_call_failed -- denying every call while looking
+            # healthy. The parameter is gone from the SDK signature, not from
+            # the API: claude-haiku-4-5 still honours it. extra_body is merged
+            # into the request JSON as-is, which is the documented way to keep
+            # a setting the pinned model accepts.
+            extra_body={"temperature": 0},
             system=JUDGE_SYSTEM_PROMPT,
             messages=[
                 {
