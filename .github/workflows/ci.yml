@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # anthropic is required, not optional. The benchmark checks the gate's
+      # outgoing request against the installed SDK's messages.create signature;
+      # without the SDK that case cannot run and reports itself as a failure
+      # rather than passing quietly. Installing it is what makes the run mean
+      # something.
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install anthropic ruff
+
+      - name: Lint
+        run: ruff check safi_gate.py run_safi_benchmark.py
+
+      - name: Benchmark (offline)
+        # No ANTHROPIC_API_KEY in CI, so Layer 2 runs in REPLAY. Sections A, C
+        # and D are fully deterministic and are the ones this gate is graded
+        # on here. The live Layer 2 result is recorded in the README and has to
+        # be reproduced by hand with a key set -- CI does not prove it.
+        run: python run_safi_benchmark.py --offline

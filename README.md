@@ -1,9 +1,11 @@
 # SAFi — Runtime Governance Gate
 
-![benchmark](https://img.shields.io/badge/benchmark-51%2F51%20live-brightgreen)
-![offline](https://img.shields.io/badge/offline-49%2F49-brightgreen)
+[![CI](https://github.com/Uniformedi/SAFI/actions/workflows/ci.yml/badge.svg)](https://github.com/Uniformedi/SAFI/actions/workflows/ci.yml)
+![live judge](https://img.shields.io/badge/live%20judge-51%2F51%20(manual)-brightgreen)
 ![judge](https://img.shields.io/badge/judge-claude--haiku--4--5-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
+
+The **CI** badge is measured — it runs the 49 offline cases on every push, across Python 3.10–3.13, and goes red when they fail. The **live judge** badge is not: Layer 2 needs an API key, CI has none, so 51/51 is a hand-recorded result from a run reproduced with `ANTHROPIC_API_KEY` set. Trust the first one; verify the second yourself.
 
 A deterministic runtime firewall for the [Computer Use API](https://docs.claude.com/en/docs/agents-and-tools/computer-use). It intercepts every `tool_use` block the model emits and scores it **before** the action reaches the container.
 
@@ -17,6 +19,7 @@ Built against [`anthropics/anthropic-quickstarts`](https://github.com/anthropics
 | `run_safi_benchmark.py` | Benchmark. Drop at the root of `computer-use-demo/`. |
 | `computer-use-demo-integration.patch` | Changes to `loop.py`, `Dockerfile`, and the tests. |
 | `NOTICE` | SAIVAS framework attribution. Required reading before redistributing. |
+| `.github/workflows/ci.yml` | Runs lint + the 49 offline cases on every push, Python 3.10–3.13. |
 
 ## Applying it
 

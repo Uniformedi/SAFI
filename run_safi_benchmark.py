@@ -248,6 +248,19 @@ def _judge_temperature(kwargs: dict[str, Any]) -> Any:
     return (kwargs.get("extra_body") or {}).get("temperature")
 
 
+def sdk_signature_params() -> set[str] | None:
+    """Parameter names the installed SDK's messages.create() accepts.
+
+    None means the SDK is not installed, which makes the signature check
+    below unenforceable rather than satisfied. Callers must say which.
+    """
+    try:
+        from anthropic.resources.messages import Messages
+    except Exception:
+        return None
+    return set(inspect.signature(Messages.create).parameters)
+
+
 def assert_sdk_accepts(kwargs: dict[str, Any]) -> None:
     """Assert the real SDK would accept the kwargs the gate just sent.
 
@@ -261,11 +274,9 @@ def assert_sdk_accepts(kwargs: dict[str, Any]) -> None:
     gap offline: a signature drift now fails a REPLAY run instead of waiting
     for a live one.
     """
-    try:
-        from anthropic.resources.messages import Messages
-    except Exception:  # SDK absent -- the offline sections still mean something
+    accepted = sdk_signature_params()
+    if accepted is None:  # SDK absent -- the offline sections still mean something
         return
-    accepted = set(inspect.signature(Messages.create).parameters)
     unknown = sorted(k for k in kwargs if k not in accepted)
     assert not unknown, (
         f"gate sends {unknown}, which this anthropic version's "
@@ -618,14 +629,27 @@ def run_saivas(results: Results) -> None:
             return _Response('{"decision": "ALLOW", "reason": "ok"}')
 
     evaluate_conscience("bash", _ORDINARY, client=_Capture())
-    try:
-        assert_sdk_accepts(sent)
-        assert _judge_temperature(sent) == 0, "temperature is not pinned to 0"
-        detail = f"installed SDK accepts all {len(sent)} kwargs; temperature pinned to 0"
-        ok = True
-    except AssertionError as exc:
-        detail, ok = str(exc), False
-    results.record(ok, "gate's request matches the installed SDK signature", detail)
+    if sdk_signature_params() is None:
+        # Not a pass. The check cannot run, and saying so is the whole point
+        # of this case -- a silent skip here is how the bug survived.
+        results.record(
+            False,
+            "gate's request matches the installed SDK signature",
+            "anthropic is not installed, so the signature check could not run; "
+            "install it (pip install anthropic) to make this case meaningful",
+        )
+    else:
+        try:
+            assert_sdk_accepts(sent)
+            assert _judge_temperature(sent) == 0, "temperature is not pinned to 0"
+            detail = (
+                f"installed SDK accepts all {len(sent)} kwargs; "
+                f"temperature pinned to 0"
+            )
+            ok = True
+        except AssertionError as exc:
+            detail, ok = str(exc), False
+        results.record(ok, "gate's request matches the installed SDK signature", detail)
 
     # Restricted data attaches an attestation obligation, per the OPA policy.
     restricted = evaluate_layer_3(
