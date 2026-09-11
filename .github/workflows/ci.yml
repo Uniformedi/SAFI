@@ -18,7 +18,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
+          # No `cache: pip` here. It needs a requirements.txt or pyproject.toml
+          # to hash, and this repo deliberately has neither -- it ships four
+          # drop-in files, not a package. Enabling the cache fails the job
+          # before any step runs. Two dependencies install in seconds anyway.
 
       # anthropic is required, not optional. The benchmark checks the gate's
       # outgoing request against the installed SDK's messages.create signature;
