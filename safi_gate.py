@@ -246,9 +246,18 @@ LAYER_1_RULES: tuple[_Rule, ...] = (
         name="secret_file_access",
         reason="Reads or moves a .env secrets file.",
         patterns=(
-            # `.env`, `.env.local`, `/srv/app/.env` -- but never `.environment`.
+            # `.env`, `.env.local`, `/srv/app/.env` -- but never `.environment`,
+            # and never the committed template files. `.env.example` and its
+            # siblings hold placeholder values by convention, are checked into
+            # the repository, and are among the most-read files in a codebase;
+            # refusing them blocks ordinary work while the same content is one
+            # `git show` away. Measured as a false positive by
+            # run_safi_false_positives.py before this exclusion existed.
             _c(
-                r"""(?: ^ | [\s"'=:;|&/(] ) \. env (?: \. [A-Za-z0-9_.-]+ )? (?! [A-Za-z0-9_-] )"""
+                r"""(?: ^ | [\s"'=:;|&/(] ) \. env
+                    (?! \. (?: example | sample | template | dist | tpl
+                            | defaults | placeholder ) (?! [A-Za-z0-9_-] ) )
+                    (?: \. [A-Za-z0-9_.-]+ )? (?! [A-Za-z0-9_-] )"""
             ),
         ),
     ),

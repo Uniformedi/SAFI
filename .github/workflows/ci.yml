@@ -56,3 +56,17 @@ jobs:
         # non-zero if the reference is missing -- there is nothing to conform
         # to in that state, and a pass would be asserting an unchecked claim.
         run: python run_saivas_conformance.py
+
+      - name: False positives
+        # A ratchet, not a target. 3.3 is just above the rate measured when
+        # this step was added (3.2%, 5/155); the remaining five are reads of
+        # documentation and directory listings that mention a blocked command
+        # without running it. Lower the number when the rate drops; raising it
+        # should take an argument, because it means the gate started refusing
+        # more ordinary work.
+        run: python run_safi_false_positives.py --max-rate 3.3
+
+      - name: Latency (offline layers)
+        # Not a gate -- CI timing is too noisy to assert on. It runs so the
+        # harness itself cannot rot unnoticed.
+        run: python run_safi_latency.py
