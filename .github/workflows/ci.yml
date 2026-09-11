@@ -36,6 +36,10 @@ jobs:
           # defaults and turned a green lint red with no code change. The
           # pin fixes which ruff runs; ruff.toml fixes which rules it applies.
           pip install anthropic 'ruff==0.16.7'
+          # The reference implementation of SAIVAS. The conformance suite
+          # imports and RUNS it rather than restating its rules, so this
+          # install is what makes that comparison real. Not on PyPI.
+          pip install 'git+https://github.com/Uniformedi/humility-guardrail@main'
 
       - name: Lint
         run: ruff check .
@@ -46,3 +50,9 @@ jobs:
         # on here. The live Layer 2 result is recorded in the README and has to
         # be reproduced by hand with a key set -- CI does not prove it.
         run: python run_safi_benchmark.py --offline
+
+      - name: SAIVAS conformance
+        # Compares SAFi Layer 3 against the reference implementation. Exits
+        # non-zero if the reference is missing -- there is nothing to conform
+        # to in that state, and a pass would be asserting an unchecked claim.
+        run: python run_saivas_conformance.py

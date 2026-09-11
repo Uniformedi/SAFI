@@ -19,7 +19,8 @@ Built against [`anthropics/anthropic-quickstarts`](https://github.com/anthropics
 | `run_safi_benchmark.py` | Benchmark. Drop at the root of `computer-use-demo/`. |
 | `computer-use-demo-integration.patch` | Changes to `loop.py`, `Dockerfile`, and the tests. |
 | `NOTICE` | SAIVAS framework attribution. Required reading before redistributing. |
-| `.github/workflows/ci.yml` | Runs lint + the 49 offline cases on every push, Python 3.10–3.13. |
+| `run_saivas_conformance.py` | Conformance suite: SAFi Layer 3 vs the reference implementation. |
+| `.github/workflows/ci.yml` | Runs lint, the 49 offline cases, and conformance on every push, Python 3.10–3.13. |
 
 ## Applying it
 
@@ -156,6 +157,31 @@ The two projects are complementary rather than overlapping, and humility-guardra
 > Humility enforces **alignment**, not **safety**. Stack it with those other layers.
 
 humility-guardrail scores what a model **says**. SAFi scores what a container will **execute**. Running both means a directive is caught whether it arrives as a message or as a payload. See [NOTICE](NOTICE) for attribution terms.
+
+### Conformance suite
+
+```bash
+pip install git+https://github.com/Uniformedi/humility-guardrail@main
+python run_saivas_conformance.py        # 26 checks
+```
+
+It **imports and runs** the reference implementation rather than restating its rules, so it cannot drift from what the reference actually does. If the reference is not installed it exits non-zero rather than passing — with nothing to conform *to*, a pass would assert a claim it never checked.
+
+| Section | Checks |
+|---|---|
+| A. Rule inventory | all six rules present, ids identical to the reference |
+| B. Severity split | H1/H3/H5 deny and H2/H4/H6 abstain, categories matching |
+| C. Pattern tables | the three phrase lists are byte-identical |
+| D. Differential — text | every pattern payload + benign controls, same classification both sides |
+| E. Differential — flags | all 72 context-flag combinations, same rule fires both sides |
+| F. Obligations | `audit.log` always, `require.attestation` iff restricted |
+| G. Declared divergences | each documented difference is present and is what the docs claim |
+
+Section G is the one that is easy to get wrong. The differences between SAFi and the reference are deliberate, so the suite asserts they **exist** — otherwise someone "fixing" one into agreement leaves NOTICE and this README describing a system that no longer exists.
+
+**What this does not prove.** Conformance to the reference *implementation* is not conformance to the SAIVAS *standard*. The suite never reads *Uniform Gnosis, Volume I*; the reference is the only authority it consults. A rule the reference gets wrong is one this suite will happily confirm SAFi gets wrong too. Establishing conformance to the published standard means reading it against both codebases — a human review, not a test run.
+
+The suite is mutation-tested: dropping a phrase from a pattern table, moving a rule between the deny and abstain sets, disabling confusable folding, or turning an abstention into a denial each produce failures rather than a quiet pass.
 
 ## License
 
