@@ -115,7 +115,31 @@ The first LIVE run of this gate failed every Layer 2 case. `anthropic` 1.x remov
 
 That gap is now closed offline: the benchmark checks the gate's actual request kwargs against the installed SDK's signature, so a signature drift fails a REPLAY run instead of waiting for a live one. Reintroducing the bug fails 3 cases with no API key present.
 
-Upstream test suite after integration: **75 passed** (73 existing + 2 new gate tests).
+### Verified against upstream
+
+Reproduced against `anthropics/anthropic-quickstarts` at `3313e97`:
+
+| | Result |
+|---|---|
+| `git apply` of the integration patch | clean, no fuzz |
+| Clean upstream, no patch | 67 passed, 6 errors |
+| With the integration applied | **69 passed**, 6 errors |
+| The 2 gate tests alone | 2 passed |
+
+The integration adds two tests and breaks none. **The 6 errors are pre-existing** — they reproduce identically on unpatched upstream and are environmental (`streamlit`'s `AppTest` cannot find the app script in this sandbox), not caused by the gate.
+
+An earlier version of this README reported "75 passed". 75 is the total test count; 69 passed and 6 errored here. The number was carried over from a build environment where the streamlit harness worked, and is corrected rather than re-asserted.
+
+### SDK compatibility
+
+Upstream pins `anthropic[bedrock,vertex]>=0.68.1,<1.0` — it **excludes** the 1.x line. The gate is verified on both:
+
+| SDK | `temperature` in signature | `extra_body` | Benchmark |
+|---|---|---|---|
+| `anthropic 0.125.0` (upstream's pin) | yes | yes | 49/49 offline |
+| `anthropic 1.5.0` | **no** | yes | 49/49 offline |
+
+Passing `extra_body={"temperature": 0}` is what works on both, which is why the gate does it rather than passing `temperature` directly. The benchmark's signature check reads the installed SDK, so it adapts instead of hardcoding either.
 
 ## Operations
 
