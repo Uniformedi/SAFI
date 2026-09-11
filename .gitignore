@@ -1,0 +1,18 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Packaging / test artifacts
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# SAFi audit log (see SAFI_AUDIT_LOG in safi_gate.py)
+safi.jsonl
