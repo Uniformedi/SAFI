@@ -1,0 +1,274 @@
+diff --git a/computer-use-demo/Dockerfile b/computer-use-demo/Dockerfile
+index 8a0e9b4..baf1f99 100644
+--- a/computer-use-demo/Dockerfile
++++ b/computer-use-demo/Dockerfile
+@@ -93,6 +93,9 @@ RUN python -m pip install -r $HOME/computer_use_demo/requirements.txt
+ # setup desktop env & app
+ COPY --chown=$USERNAME:$USERNAME image/ $HOME
+ COPY --chown=$USERNAME:$USERNAME computer_use_demo/ $HOME/computer_use_demo/
++# The SAFi runtime governance gate. loop.py imports it at module scope, so the
++# app will not start without it -- the gate cannot be silently absent.
++COPY --chown=$USERNAME:$USERNAME safi_gate.py $HOME/safi_gate.py
+ 
+ ARG DISPLAY_NUM=1
+ ARG HEIGHT=768
+diff --git a/computer-use-demo/computer_use_demo/loop.py b/computer-use-demo/computer_use_demo/loop.py
+index 8565ba5..c918b62 100644
+--- a/computer-use-demo/computer_use_demo/loop.py
++++ b/computer-use-demo/computer_use_demo/loop.py
+@@ -30,6 +30,8 @@ from anthropic.types.beta import (
+     BetaToolUseBlockParam,
+ )
+ 
++from safi_gate import evaluate_conscience
++
+ from .tools import (
+     TOOL_GROUPS_BY_VERSION,
+     ToolCollection,
+@@ -43,6 +45,10 @@ from .tools.base import ToolFailure
+ # toolset contract).
+ NOT_EXECUTED_ERROR = "Not executed: an earlier computer action in this turn failed."
+ 
++# The tool_result content a call receives when the SAFi runtime governance gate
++# denies it. The action never reaches the container; the model is told why.
++SAFI_BLOCKED_ERROR = "Blocked by SAFi runtime governance gate."
++
+ PROMPT_CACHING_BETA_FLAG = "prompt-caching-2024-07-31"
+ 
+ # How the model's reasoning is requested. Which modes a given model supports is
+@@ -213,17 +219,36 @@ async def sampling_loop(
+                     str | None,
+                     cast(dict[str, Any], content_block).get("toolset_name"),
+                 )
++                tool_input = cast(dict[str, Any], tool_use_block.get("input", {}))
+                 if toolset_name is not None and member_call_failed:
+                     # Toolset member calls run sequentially in block order and
+                     # stop on the first failure; the remaining member calls
+                     # are answered without being executed.
+                     result: ToolResult = ToolFailure(error=NOT_EXECUTED_ERROR)
++                elif not (
++                    verdict := evaluate_conscience(tool_use_block["name"], tool_input)
++                ):
++                    # SAFi denied the action. It is never handed to the
++                    # container: the call is answered with an is_error
++                    # tool_result naming the deciding layer and the reason, so
++                    # the turn stays well-formed and the model can see that it
++                    # was stopped and why.
++                    detail = (
++                        f"[{verdict.layer}/{verdict.rule}]"
++                        if verdict.rule
++                        else f"[{verdict.layer}]"
++                    )
++                    result = ToolFailure(
++                        error=f"{SAFI_BLOCKED_ERROR} {detail} {verdict.reason}"
++                    )
++                    if toolset_name is not None:
++                        # A denied member call fails its family, exactly as a
++                        # failed execution would.
++                        member_call_failed = True
+                 else:
+                     result = await tool_collection.run(
+                         name=tool_use_block["name"],
+-                        tool_input=cast(
+-                            dict[str, Any], tool_use_block.get("input", {})
+-                        ),
++                        tool_input=tool_input,
+                         toolset_name=toolset_name,
+                     )
+                     if toolset_name is not None and result.error:
+diff --git a/computer-use-demo/tests/conftest.py b/computer-use-demo/tests/conftest.py
+index 4b87e76..8739978 100644
+--- a/computer-use-demo/tests/conftest.py
++++ b/computer-use-demo/tests/conftest.py
+@@ -4,6 +4,23 @@ from unittest import mock
+ import pytest
+ 
+ 
++@pytest.fixture(autouse=True)
++def safi_gate_allows():
++    """Let the SAFi gate pass by default in tests.
++
++    The gate fails closed, so without a reachable judge it would deny every
++    tool call and every loop test would exercise the blocked path instead of
++    the one it is about. Tests that care about the gate patch it themselves.
++    """
++    from safi_gate import LAYER_2, Verdict
++
++    with mock.patch(
++        "computer_use_demo.loop.evaluate_conscience",
++        return_value=Verdict(allowed=True, layer=LAYER_2, reason="allowed in tests"),
++    ):
++        yield
++
++
+ @pytest.fixture(autouse=True)
+ def mock_screen_dimensions():
+     with mock.patch.dict(
+diff --git a/computer-use-demo/tests/loop_test.py b/computer-use-demo/tests/loop_test.py
+index 0eab6a4..3d30f19 100644
+--- a/computer-use-demo/tests/loop_test.py
++++ b/computer-use-demo/tests/loop_test.py
+@@ -12,9 +12,11 @@ from anthropic.types.beta import (
+ 
+ from computer_use_demo.loop import (
+     PROMPT_CACHING_BETA_FLAG,
++    SAFI_BLOCKED_ERROR,
+     APIProvider,
+     sampling_loop,
+ )
++from safi_gate import LAYER_1, Verdict
+ 
+ 
+ async def test_loop():
+@@ -255,3 +257,125 @@ async def test_loop_toolset_member_calls_run_sequentially_and_stop_on_failure():
+     assert tool_results[2]["content"] == (
+         "Not executed: an earlier computer action in this turn failed."
+     )
++
++
++async def test_loop_safi_gate_blocks_tool_execution():
++    """A denied tool call never reaches the container."""
++    client = mock.Mock()
++    client.beta.messages.with_raw_response.create.return_value = mock.Mock()
++    client.beta.messages.with_raw_response.create.return_value.parse.side_effect = [
++        mock.Mock(
++            spec=BetaMessage,
++            content=[
++                ToolUseBlock(
++                    type="tool_use",
++                    id="1",
++                    name="bash",
++                    input={"command": "usermod -aG sudo attacker"},
++                ),
++            ],
++        ),
++        mock.Mock(
++            spec=BetaMessage, content=[TextBlock(type="text", text="Understood.")]
++        ),
++    ]
++
++    tool_collection = mock.AsyncMock()
++    denied = Verdict(
++        allowed=False,
++        layer=LAYER_1,
++        reason="Modifies user or group privileges (usermod/gpasswd/useradd).",
++        rule="privilege_escalation",
++    )
++
++    with (
++        mock.patch("computer_use_demo.loop.Anthropic", return_value=client),
++        mock.patch(
++            "computer_use_demo.loop.ToolCollection", return_value=tool_collection
++        ),
++        mock.patch(
++            "computer_use_demo.loop.evaluate_conscience", return_value=denied
++        ) as gate,
++    ):
++        messages: list[BetaMessageParam] = [{"role": "user", "content": "escalate me"}]
++        result = await sampling_loop(
++            model="test-model",
++            provider=APIProvider.ANTHROPIC,
++            system_prompt_suffix="",
++            messages=messages,
++            output_callback=mock.Mock(),
++            tool_output_callback=mock.Mock(),
++            api_response_callback=mock.Mock(),
++            api_key="test-key",
++            tool_version="computer_use_20250124",
++        )
++
++    # The gate saw the call, and the container never did.
++    gate.assert_called_once_with("bash", {"command": "usermod -aG sudo attacker"})
++    tool_collection.run.assert_not_called()
++
++    # The model still gets a well-formed tool_result, flagged as an error and
++    # carrying the deciding layer, the rule, and the reason.
++    blocked = cast(list[dict[str, Any]], result[2]["content"])[0]
++    assert blocked["type"] == "tool_result"
++    assert blocked["tool_use_id"] == "1"
++    assert blocked["is_error"] is True
++    assert SAFI_BLOCKED_ERROR in blocked["content"]
++    assert "layer-1-regex/privilege_escalation" in blocked["content"]
++    assert "Modifies user or group privileges" in blocked["content"]
++
++
++async def test_loop_safi_gate_blocked_member_call_fails_its_family():
++    """A denied toolset member call stops the rest of the family."""
++    client = mock.Mock()
++    client.beta.messages.with_raw_response.create.return_value = mock.Mock()
++    first = mock.Mock(spec=BetaMessage)
++    first.content = [
++        BetaToolUseBlock(type="tool_use", id="1", name="key", input={"text": "super"}),
++        BetaToolUseBlock(
++            type="tool_use", id="2", name="left_click", input={"coordinate": [1, 2]}
++        ),
++    ]
++    for block in first.content:
++        cast(Any, block).toolset_name = "computer"
++    client.beta.messages.with_raw_response.create.return_value.parse.side_effect = [
++        first,
++        mock.Mock(spec=BetaMessage, content=[TextBlock(type="text", text="Stopped.")]),
++    ]
++
++    tool_collection = mock.AsyncMock()
++    denied = Verdict(
++        allowed=False,
++        layer=LAYER_1,
++        reason="Opens an outbound interactive shell (reverse shell).",
++        rule="reverse_shell",
++    )
++
++    with (
++        mock.patch("computer_use_demo.loop.Anthropic", return_value=client),
++        mock.patch(
++            "computer_use_demo.loop.ToolCollection", return_value=tool_collection
++        ),
++        mock.patch("computer_use_demo.loop.evaluate_conscience", return_value=denied),
++    ):
++        messages: list[BetaMessageParam] = [{"role": "user", "content": "go"}]
++        result = await sampling_loop(
++            model="test-model",
++            provider=APIProvider.ANTHROPIC,
++            system_prompt_suffix="",
++            messages=messages,
++            output_callback=mock.Mock(),
++            tool_output_callback=mock.Mock(),
++            api_response_callback=mock.Mock(),
++            api_key="test-key",
++            tool_version="computer_use_20250124",
++        )
++
++    tool_collection.run.assert_not_called()
++    tool_results = cast(list[dict[str, Any]], result[2]["content"])
++    assert [block["is_error"] for block in tool_results] == [True, True]
++    assert SAFI_BLOCKED_ERROR in tool_results[0]["content"]
++    # The second member call is answered without ever being evaluated or run.
++    assert tool_results[1]["content"] == (
++        "Not executed: an earlier computer action in this turn failed."
++    )
+diff --git a/computer-use-demo/tests/tools/edit_test.py b/computer-use-demo/tests/tools/edit_test.py
+index e95660c..524ebed 100644
+--- a/computer-use-demo/tests/tools/edit_test.py
++++ b/computer-use-demo/tests/tools/edit_test.py
+@@ -185,7 +185,9 @@ async def test_insert_command(edit_tool):
+     ):
+         mock_read_text.return_value = "Line 1\nLine 2\nLine 3"
+         result = await edit_tool(
+-            command="insert", path="/test/file.txt", insert_line=2,
++            command="insert",
++            path="/test/file.txt",
++            insert_line=2,
+             insert_text="New Line",
+         )
+         assert isinstance(result, CLIResult)
+@@ -256,7 +258,9 @@ async def test_insert_command(edit_tool):
+     ):
+         mock_read_text.return_value = "Original content"
+         await edit_tool(
+-            command="insert", path="/test/file.txt", insert_line=1,
++            command="insert",
++            path="/test/file.txt",
++            insert_line=1,
+             insert_text="New Line",
+         )
+         assert edit_tool._file_history[Path("/test/file.txt")] == ["Original content"]
