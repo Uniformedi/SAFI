@@ -1,0 +1,29 @@
+SAFi
+Copyright (c) 2026 Dan Medina / Uniformedi LLC
+
+This product implements the SAIVAS (Sentient AI Value Alignment Standard)
+framework, originally published in:
+
+    Uniform Gnosis, Volume I
+    by Dan Medina
+    https://uniformgnosis.com/Uniform_Gnosis_Volume_I
+
+SAIVAS and the Humility principles (H1-H6) are intellectual property of
+Dan Medina. This repository is released under the MIT License (see LICENSE).
+
+Layer 3 of the gate (`evaluate_layer_3` in safi_gate.py) is a port of the
+Humility rule semantics from the reference implementation:
+
+    https://github.com/Uniformedi/humility-guardrail
+
+The rule split is preserved from that implementation -- H1/H3/H5 deny,
+H2/H4/H6 abstain -- but the subject matter is not. humility-guardrail scores
+conversational messages; SAFi Layer 3 scores proposed tool calls. The
+adaptation and any errors in it belong to this repository, not to the
+reference implementation.
+
+Downstream users are encouraged but not required to credit the framework
+in user-facing documentation:
+
+    "Runtime governance provided by SAFi
+     (SAIVAS framework, Uniform Gnosis Vol. I, Dan Medina)."
