@@ -1,0 +1,36 @@
+# Explicit rule selection, not ruff's defaults.
+#
+# CI installs ruff fresh, so without this file the rule set is whatever the
+# newest release happens to default to -- which is how this repo's first green
+# lint became a red one with no code change: ruff 0.16 added BLE001, PLE2502
+# and PLE2515 to its defaults and the pinned-version container never saw them.
+# A linter that can change its mind between runs is not a signal.
+#
+# The version is pinned in .github/workflows/ci.yml as well. Both are needed:
+# the pin fixes which ruff runs, this file fixes which rules it applies.
+
+target-version = "py310"
+
+# 100, not the usual 88, because two lines cannot be wrapped without
+# changing behaviour: the judge prompt's JSON contract line (wrapping it
+# inserts a newline into what the model is sent, and a trailing `# noqa`
+# would land inside the string literal), and the .env regex, where a break
+# risks the semantics of a character class. Everything else fits well under.
+line-length = 100
+
+[lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # import sorting
+    "B",         # bugbear
+    "UP",        # pyupgrade
+    "C4",        # comprehensions
+    "SIM",       # simplify
+    "RUF",       # ruff-specific
+    "BLE",       # blind except -- deliberate here, and each one is annotated
+    "PLE",       # pylint errors, incl. the control-character rules that
+                 # matter more in this repo than most: PLE2502 is the
+                 # Trojan Source class, and this file handles exactly that
+    "T20",       # print -- the benchmark opts out at file scope, on purpose
+]

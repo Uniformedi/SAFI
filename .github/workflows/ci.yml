@@ -31,10 +31,14 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install anthropic ruff
+          # ruff is PINNED. Unpinned, the rule set is whatever the newest
+          # release defaults to -- 0.16 added BLE001/PLE2502/PLE2515 to its
+          # defaults and turned a green lint red with no code change. The
+          # pin fixes which ruff runs; ruff.toml fixes which rules it applies.
+          pip install anthropic 'ruff==0.16.7'
 
       - name: Lint
-        run: ruff check safi_gate.py run_safi_benchmark.py
+        run: ruff check .
 
       - name: Benchmark (offline)
         # No ANTHROPIC_API_KEY in CI, so Layer 2 runs in REPLAY. Sections A, C

@@ -153,37 +153,40 @@ def _c(pattern: str) -> re.Pattern[str]:
 # slip a keyword past a literal matcher. NFKC does NOT fold these: it
 # normalises *compatibility* forms (fullwidth, ligatures, superscripts), and
 # Cyrillic/Greek lookalikes are distinct characters with their own identity,
-# not compatibility variants of Latin ones. So NFKC alone stops `ｕｓｅｒｍｏｄ`
-# and does nothing about `usеrmod` with a Cyrillic е. Both have to be handled,
+# not compatibility variants of Latin ones. So NFKC alone folds a fullwidth
+# `usermod` (U+FF55 U+FF53 ...) and does nothing about one whose `e` is a
+# Cyrillic U+0435. Both have to be handled,
 # and they are handled separately because they are different problems.
 _CONFUSABLES: Mapping[str, str] = {
     # Cyrillic
-    "а": "a", "е": "e", "о": "o", "р": "p",
-    "с": "c", "у": "y", "х": "x", "ѕ": "s",
-    "і": "i", "ј": "j", "һ": "h", "ԁ": "d",
+    "\u0430": "a", "\u0435": "e", "\u043e": "o", "\u0440": "p",
+    "\u0441": "c", "\u0443": "y", "\u0445": "x", "\u0455": "s",
+    "\u0456": "i", "\u0458": "j", "\u04bb": "h", "\u0501": "d",
     # Greek
-    "ο": "o", "ρ": "p", "ν": "v", "υ": "u",
-    "Α": "a", "Β": "b", "Ε": "e", "Η": "h",
-    "Ι": "i", "Κ": "k", "Μ": "m", "Ν": "n",
-    "Ο": "o", "Ρ": "p", "Τ": "t", "Χ": "x",
+    "\u03bf": "o", "\u03c1": "p", "\u03bd": "v", "\u03c5": "u",
+    "\u0391": "a", "\u0392": "b", "\u0395": "e", "\u0397": "h",
+    "\u0399": "i", "\u039a": "k", "\u039c": "m", "\u039d": "n",
+    "\u039f": "o", "\u03a1": "p", "\u03a4": "t", "\u03a7": "x",
     # Armenian / Cherokee strays that show up in practice
-    "օ": "o", "Ꭰ": "a", "Ꮐ": "g",
+    "\u0585": "o", "\u13a0": "a", "\u13c0": "g",
 }
 
 _CONFUSABLE_TABLE = str.maketrans(_CONFUSABLES)
 
 # Zero-width and bidi controls: invisible, and they split a keyword in two
 # without changing how it renders or how a shell parses it after paste.
-_INVISIBLES = re.compile(r"[­​-‏‪-‮⁠-⁤﻿]")
+_INVISIBLES = re.compile(
+    "[" "\u00ad" "\u200b-\u200f" "\u202a-\u202e" "\u2060-\u2064" "\ufeff" "]"
+)
 
 
 def normalize(text: str) -> str:
     """Fold a payload to the form the deterministic screens match against.
 
     Three passes, each closing a distinct bypass:
-      1. strip invisible formatting/bidi controls  (`us​ermod`)
-      2. NFKC                                      (`ｕｓｅｒｍｏｄ`)
-      3. confusable folding                        (`usеrmod`, Cyrillic е)
+      1. strip invisible formatting/bidi controls  (`usermod` split by U+200B)
+      2. NFKC                                      (`usermod` in fullwidth forms)
+      3. confusable folding                        (`usermod` with Cyrillic U+0435)
 
     Case is left alone -- the Layer 1 patterns already carry re.IGNORECASE,
     and Layer 3 lowercases its own haystack.
@@ -722,7 +725,8 @@ def evaluate_layer_2(tool_name: str, tool_input: Any, *, client: Any = None) -> 
 
     try:
         judge = client if client is not None else _default_client()
-    except Exception as exc:  # missing SDK, missing credential, bad config
+    except Exception as exc:  # noqa: BLE001 -- fail closed on ANY error
+        # missing SDK, missing credential, bad config
         return Verdict(
             allowed=False,
             layer=LAYER_2,
@@ -757,7 +761,8 @@ def evaluate_layer_2(tool_name: str, tool_input: Any, *, client: Any = None) -> 
                 }
             ],
         )
-    except Exception as exc:  # network, auth, rate limit, timeout, overload
+    except Exception as exc:  # noqa: BLE001 -- fail closed on ANY error
+        # network, auth, rate limit, timeout, overload
         return Verdict(
             allowed=False,
             layer=LAYER_2,
